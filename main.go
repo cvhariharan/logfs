@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
@@ -47,8 +49,8 @@ func usage() {
 	flag.PrintDefaults()
 }
 
-type Entry struct {
-	Type fuse.DirentType
+type EntryGetter interface {
+	GetDirentType() fuse.DirentType
 }
 
 type FS struct{}
@@ -58,18 +60,28 @@ func (f FS) Root() (fs.Node, error) {
 }
 
 type Dir struct {
-	Entry
+	Type    fuse.DirentType
 	Inode   uint64
 	Entries map[string]interface{}
 }
 
+var _ = (fs.Node)((*Dir)(nil))
+var _ = (fs.NodeMkdirer)((*Dir)(nil))
+var _ = (fs.NodeCreater)((*Dir)(nil))
+var _ = (fs.HandleReadDirAller)((*Dir)(nil))
+var _ = (EntryGetter)((*Dir)(nil))
+
 func NewDir() *Dir {
-	inodeCount++
+	atomic.AddUint64(&inodeCount, 1)
 	return &Dir{
+		Type:    fuse.DT_Dir,
 		Inode:   inodeCount,
-		Entry:   Entry{fuse.DT_Dir},
 		Entries: map[string]interface{}{},
 	}
+}
+
+func (d *Dir) GetDirentType() fuse.DirentType {
+	return d.Type
 }
 
 func (d *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error) {
@@ -80,7 +92,7 @@ func (d *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error
 
 func (d *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
 	a.Inode = d.Inode
-	a.Mode = os.ModeDir | 0o755
+	a.Mode = os.ModeDir | 0o777
 	return nil
 }
 
@@ -101,9 +113,77 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 		v.(fs.Node).Attr(ctx, &a)
 		entries = append(entries, fuse.Dirent{
 			Inode: a.Inode,
-			Type:  v.(*Dir).Type,
+			Type:  v.(EntryGetter).GetDirentType(),
 			Name:  k,
 		})
 	}
 	return entries, nil
+}
+
+func (d *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
+	f := NewFile(nil)
+	log.Println("Create: Modified at", f.Attributes.Mtime.String())
+	d.Entries[req.Name] = f
+	return f, f, nil
+}
+
+type File struct {
+	Type       fuse.DirentType
+	Content    []byte
+	Attributes fuse.Attr
+}
+
+var _ = (fs.Node)((*File)(nil))
+var _ = (fs.HandleWriter)((*File)(nil))
+var _ = (fs.HandleReadAller)((*File)(nil))
+var _ = (fs.NodeSetattrer)((*File)(nil))
+var _ = (EntryGetter)((*File)(nil))
+
+func NewFile(content []byte) *File {
+	log.Println("NewFile called")
+	atomic.AddUint64(&inodeCount, 1)
+	return &File{
+		Type:    fuse.DT_File,
+		Content: content,
+		Attributes: fuse.Attr{
+			Inode: inodeCount,
+			Atime: time.Now(),
+			Mtime: time.Now(),
+			Ctime: time.Now(),
+			Mode:  0o777,
+		},
+	}
+}
+
+func (f *File) GetDirentType() fuse.DirentType {
+	return f.Type
+}
+
+func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {
+	*a = f.Attributes
+	log.Println("Attr: Modified At", a.Mtime.String())
+	return nil
+}
+
+func (f *File) ReadAll(ctx context.Context) ([]byte, error) {
+	log.Println("ReadAll called")
+	return f.Content, nil
+}
+
+func (f *File) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
+	f.Content = append(f.Content, req.Data...)
+	resp.Size = len(req.Data)
+	f.Attributes.Size = uint64(resp.Size)
+	log.Println("Write called: Size ", f.Attributes.Size)
+	return nil
+}
+
+func (f *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
+	f.Attributes.Mtime = req.Mtime
+	f.Attributes.Atime = req.Atime
+	f.Attributes.Size += req.Size
+	resp.Attr.Size = req.Size
+	resp.Attr.Valid = time.Minute
+	log.Println("Setattr called: Modified at ", f.Attributes.Mtime)
+	return nil
 }
