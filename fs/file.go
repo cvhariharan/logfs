@@ -3,6 +3,7 @@ package fs
 import (
 	"context"
 	"log"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 )
 
 type File struct {
+	Path    string
 	Type    fuse.DirentType
 	Content []byte
 	Inode   uint64
@@ -22,9 +24,10 @@ var _ = (fs.HandleReadAller)((*File)(nil))
 var _ = (fs.NodeSetattrer)((*File)(nil))
 var _ = (EntryGetter)((*File)(nil))
 
-func NewFile(content []byte) *File {
+func NewFile(name, parentPath string, content []byte) *File {
 	log.Println("NewFile called")
 	f := &File{
+		Path:    filepath.Join(parentPath, name),
 		Type:    fuse.DT_File,
 		Content: content,
 	}

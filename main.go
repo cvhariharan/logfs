@@ -10,6 +10,7 @@ import (
 	"bazil.org/fuse/fs"
 	_ "bazil.org/fuse/fs/fstestutil"
 	logfs "github.com/cvhariharan/logfs/fs"
+	_ "github.com/cvhariharan/logfs/storage"
 )
 
 func main() {

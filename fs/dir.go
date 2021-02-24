@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -13,6 +14,7 @@ import (
 )
 
 type Dir struct {
+	Path  string
 	Type  fuse.DirentType
 	Inode uint64
 }
@@ -24,7 +26,7 @@ var _ = (fs.HandleReadDirAller)((*Dir)(nil))
 var _ = (fs.NodeSetattrer)((*Dir)(nil))
 var _ = (EntryGetter)((*Dir)(nil))
 
-func NewDir() *Dir {
+func NewDir(name, parentPath string) *Dir {
 	log.Println("NewDir called")
 	atomic.AddUint64(&inodeCount, 1)
 	Index.SetAttributes(inodeCount, fuse.Attr{
@@ -35,6 +37,7 @@ func NewDir() *Dir {
 		Mode:  os.ModeDir | 0o777,
 	})
 	return &Dir{
+		Path:  filepath.Join(parentPath, name),
 		Type:  fuse.DT_Dir,
 		Inode: inodeCount,
 	}
@@ -46,7 +49,7 @@ func (d *Dir) GetDirentType() fuse.DirentType {
 
 func (d *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error) {
 	log.Println("Mkdir called with name: ", req.Name)
-	dir := NewDir()
+	dir := NewDir(req.Name, d.Path)
 	Index.SetInDir(d.Inode, req.Name, dir)
 	return dir, nil
 }
@@ -84,7 +87,7 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 
 func (d *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
 	log.Println("Create called with filename: ", req.Name)
-	f := NewFile(nil)
+	f := NewFile(req.Name, d.Path, nil)
 	attr, _ := Index.GetAttributes(f.Inode)
 	log.Println("Create: Modified at", attr.Mtime)
 	Index.SetInDir(d.Inode, req.Name, f)

@@ -23,5 +23,5 @@ func NewFS() FS {
 }
 
 func (f FS) Root() (fs.Node, error) {
-	return NewDir(), nil
+	return NewDir("root", ""), nil
 }
